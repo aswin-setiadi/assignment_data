@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fastapi-email
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fastapi-email
+  template:
+    metadata:
+      labels:
+        app: fastapi-email
+    spec:
+      containers:
+      - name: fastapi
+        image: fastapi-email:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8000
+        env:
+        - name: MONGODB_URI
+          value: mongodb://admin:password123@mongodb-service:27017
+        - name: DB_NAME
+          value: test
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fastapi-email
+spec:
+  type: ClusterIP
+  selector:
+    app: fastapi-email
+  ports:
+  - port: 80
+    targetPort: 8000

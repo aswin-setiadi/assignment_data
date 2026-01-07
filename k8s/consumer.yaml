@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: consumer
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: consumer
+  template:
+    metadata:
+      labels:
+        app: consumer
+    spec:
+      containers:
+      - name: consumer
+        image: email-consumer:latest
+        imagePullPolicy: Never
+        env:
+        - name: KAFKA_BROKER
+          value: kafka:9092
+        - name: MONGODB_URI
+          value: mongodb://admin:password123@mongodb-service:27017
+        - name: CREATE_INDEX
+          value: "true"
+        - name: DB_NAME
+          value: "test"

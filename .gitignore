@@ -1,0 +1,5 @@
+producer/data/*
+*.pdf
+.venv
+*/__pycache__/*
+.vscode
