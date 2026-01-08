@@ -8,7 +8,7 @@
 
 - Some user has no explicit email address.
 
-- A preceeding slightly modified thread will have the same variation in the next thread chain e.g. 96_1m, 96_1m_2, 96_1m_2m, 1m amongst the 3 are the same
+- A preceeding slightly modified thread will have the exact same variation in the next thread chain e.g. 96_1m, 96_1m_2, 96_1m_2m, 1m amongst the 3 are the same
 
 - There seemed to be no variation in the subject
 
@@ -32,21 +32,22 @@
 - It seems when an email thread has started, the subject will have variation of Re: and Fwd:
 - It seems every email thread variations have the same combination of From: To CC: Subject: (those lines start with them). then email body. The samples also doesn't have space between the word and :.
 - Email stream may come not in order e.g. 6_1_2 -> 6 -> 6_1
-- We don't know if an email belong to which canonical thread, so we will not use kafka partition
-- To make the same raw document getting stored, we filter the upsert against documentid/ filename
+- We don't know if an email belong to which canonical thread, so we will not use kafka message key
+- To make the same raw document getting stored, we filter the upsert against documentid/ filename.
 
 ## Implementation
 
-1. Mount the sample email folder (eval or test) minikube mount e.g. ./samples:test
-2. Create a mock producer that cycle the payload (read from folder in 1)
-3. Cosumer group will consume each payload, save to mongodb database email collection CanonicalThread
-4. Each thread will be grouped by combination of document (row in sql) attribute subject+rank where subject is thread first email subject, rank is email count in the thread. One approach to save to db is to have a document for each thread/ raw text
-5. Should a update fail on a given payload (consumer crash after retrying if error is transient), instead of keep reconsuming, in the catch exception block, send the payload to dead letter queue topic and commit the offset. Set notification tool (slack, email, etc.) should the DLQ get sudden message spikes
+1. Mount the sample email folder (eval or test) minikube mount e.g. ./samples:test (currently minikube QEMU does not support so I upload it to the producer docker image).
+2. Create a kafka producer with a topic and maximum partition count (I use 30 for this assignment) that cycle the payload (read from folder producer/data/eval|test) endlessly to simulate real life streaming.
+3. Consumer group will consume each payload, save to mongodb database: email (for eval)/ test  collection: canonicalthread and rawemail.
+4. Each thread will be grouped by combination of document (row in sql) attribute Subject+rank where Subject is thread first email subject, rank is email count in the thread.
+5. Should an update fail on a given payload (consumer raised exception, db down, etc.), instead of keep reconsuming, in the catch exception block, send the payload to dead letter queue topic and commit the offset. Set notification tool (slack, email, etc.) should the DLQ get sudden message spikes for monitoring.
 6. Don't assign key to producer message since the grouping by subject members are relatively small. This means message key is None which allows kafka to use round-robin or sticky partitioning to distribute load more evenly across all consumers/ partitions, preventing "hot partitions" where one consumer is overloaded.
 7. In the event 2 producer send 2 payload with same doc_id for the first time at the same time, the upsert operation might insert 2 raw email to `rawemail` collection (but `$addToSet` prevent adding duplicate doc_id to **doc_ids** attribute of `canonicalthread` collection). This will be prevented by introducing unique index on `rawemail` collection.
 
 ## Deployment
 
+- $ checkout master branch
 - $ minikube start
 - $ minikube dashboard
 - $ eval $(minikube docker-env)
