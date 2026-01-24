@@ -54,6 +54,7 @@ def consume(consumer_close_timeout:int=3, dlq_producer_flush_timeout:int=3):
 
         consumer.close(timeout_ms=consumer_close_timeout*1000)
         dlq_producer.flush(dlq_producer_flush_timeout)
+        dlq_producer.close()
         logger.info("consumer exit...")
 
 def flush_messages():
