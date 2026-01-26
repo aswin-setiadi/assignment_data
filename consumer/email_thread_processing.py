@@ -3,34 +3,54 @@ import os
 import random
 import re
 import time
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 from pymongo.results import UpdateResult
+import simhash
 
 from models import CanonicalThreadModel, RawEmailThreadModel
 client= MongoClient(os.getenv("MONGODB_URI"))
 logger= logging.getLogger(__name__)
 
 
-
 class ThreadProcessing:
-    SUBJECT_RE_PATTERN= r'^((Re|Fwd):\s*)+'
     DB_NAME= os.getenv("DB_NAME", "email")
     CT_COLL_NAME= "canonicalthread"
     RE_COLL_NAME= "rawemail"
+    SIM_THRESHOLD= 0.8
 
     @classmethod
     def create_canonical_thread(cls, doc_id:str, raw:str, emails:List[Tuple], client:MongoClient, max_try:int=2):
+        """Email Tuple is participants, subject, body"""
         if emails:
-            Subject= emails[0][3]
+            # p is final participants
+            p=emails[0][0].copy()
+            if len(emails)>1:
+                for email in emails[1:]:
+                    for x in email[0]:
+                        for i,y in enumerate(p):
+                            # replace username without email with username with email if exist
+                            if len(y)<len(x):
+                                if y in x:
+                                    p[i]=x
+                                    break
+                            else:
+                                if x in y:
+                                    break
+                        else:
+                            p.append(x)
+            # create simhash for last email subject+body
+            tmp= emails[-1][1] + emails[-1][2]
+            fuzzy_key= str(simhash.Simhash(tmp).value)
             rank= len(emails)
-            ctm= CanonicalThreadModel(Subject, rank, [doc_id])
+            ctm= CanonicalThreadModel(p, fuzzy_key, rank, [doc_id])
             # mongodb cant setOnInsert and addToSet to same attribute
             # remove doc_ids from setOnInsert
             data= ctm.to_dict()
             data.pop("doc_ids")
+            data.pop("participants")
             retm= RawEmailThreadModel(doc_id, raw)
             ct_coll= client[cls.DB_NAME][cls.CT_COLL_NAME]
             ret_coll= client[cls.DB_NAME][cls.RE_COLL_NAME]
@@ -51,10 +71,10 @@ class ThreadProcessing:
                             logger.info(f"{doc_id=} already exist...")
                         else:
                             ctm_res:UpdateResult=ct_coll.update_one(
-                                filter={"Subject":Subject, "rank":rank},
+                                filter={"fuzzy_key":fuzzy_key, "rank":rank},
                                 update={
                                     "$setOnInsert":data,
-                                    "$addToSet":{"doc_ids": doc_id}
+                                    "$addToSet":{"doc_ids": doc_id, "participants":{"$each":p}}
                                 },
                                 upsert=True, session=session
                             )
@@ -77,6 +97,36 @@ class ThreadProcessing:
         else:
             raise
 
+    @staticmethod
+    def normalize_body(body:str):
+        if not body:
+            return ""
+        body= re.sub(r"\s+", " ", body).strip()
+        all_ascii = re.sub(r"[^\x00-\x7F]+", r"", body)
+        return all_ascii.lower()
+
+    @staticmethod
+    def split_participant_field(s:str)-> List[str]:
+        if "," in s:
+            l= s.split(",")
+        elif ";" in s:
+            l= s.split(";")
+        else:
+            l= [s]
+        for i in range(len(l)):
+            # we can store username email relationship in a new collection
+            # but for this exercise we will use mongodb text search to allow
+            # searching by either username or email. There is hard requirement in mongodb for searching -/ hyphen
+            # must use regex search instead cause text search -x means does not include word x
+            # $text search is case insensitive by default
+            l[i]= re.sub(r"\s+", " ", l[i].strip())
+        return l
+
+    @staticmethod
+    def normalize_subject(subject:str):
+        subject= re.sub(r"^((re|fwd):\s*)+", "", subject[8:].lower())
+        return re.sub(r"\s+", " ", subject).strip()
+
     @classmethod
     def split_thread(cls, text:str)-> List[Tuple]:
         emails:List[Tuple]=[]
@@ -90,39 +140,44 @@ class ThreadProcessing:
             if line.startswith("From:"):
                 # Flush previous email
                 if current_from is not None:
+                    body= cls.normalize_body("\n".join(body_lines))
                     emails.append((
                         current_from,
                         current_to,
                         current_cc,
                         current_subject,
-                        "\n".join(body_lines).strip()
+                        body
                     ))
                 # Start new email
-                current_from = line[len("From:"):].strip()
+                current_from = ThreadProcessing.split_participant_field(line[5:].strip())
                 current_to = None
                 current_cc = None
                 current_subject = None
                 body_lines = []
 
             elif line.startswith("To:"):
-                current_to = line[len("To:"):].strip()
+                current_to = ThreadProcessing.split_participant_field(line[3:].strip())
             elif line.startswith("CC:"):
-                current_cc = line[len("CC:"):].strip()
+                current_cc = ThreadProcessing.split_participant_field(line[3:].strip())
             elif line.startswith("Subject:"):
-                current_subject = line[len("Subject:"):].strip()
-                current_subject = re.sub(cls.SUBJECT_RE_PATTERN, "", current_subject, flags=re.I)
+                current_subject = cls.normalize_subject(line)
                 # we can further normalize by lower capital, remove whitespaces
             else:
                 body_lines.append(line)
 
         # Flush last email
         if current_from is not None:
+            body= cls.normalize_body("\n".join(body_lines))
+            # create unique member list, we assume from to cc set members are unique
+            participants=current_from
+            if isinstance(current_to, list):
+                participants.extend(current_to)
+            if isinstance(current_cc, list):
+                participants.extend(current_cc)
             emails.append((
-                current_from,
-                current_to,
-                current_cc,
+                participants,
                 current_subject,
-                "\n".join(body_lines).strip()
+                body
             ))
 
         return emails
