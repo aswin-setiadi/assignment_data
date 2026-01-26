@@ -20,6 +20,8 @@ TOPIC = "email_threads"
 logging.basicConfig(level=logging.INFO)
 logger= logging.getLogger(__name__)
 set_partition(TOPIC, KAFKA_BROKER, logger)
+# declare as global variable (reccomended practice, keep connection to kafka alive) if we keep declare send close, waste latency
+# from network connection overhead, client resource setup
 producer = KafkaProducer(
     bootstrap_servers=KAFKA_BROKER,
     # value_serializer=lambda v: json.dumps(v.encode("utf-8"))
