@@ -24,21 +24,21 @@ def health():
 @app.get("/canonicalthreadid/{doc_id}")
 def get_canonicalthread_id(doc_id: str):
     try:
-        res= mongo_client[DB_NAME]["canonicalthread"].find_one(filter={"doc_ids":doc_id}, projection={"Subject":1, "rank":1, "_id":0})
+        res= mongo_client[DB_NAME]["canonicalthread"].find_one(filter={"doc_ids":doc_id}, projection={"fuzzy_key":1, "rank":1, "_id":0})
     except Exception as e:
         logger.exception(e)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server encountered an error")
     if res is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"canonicalthread with doc_id {doc_id} not found")
     else:
-        data={"result":f"{res['Subject']}{res['rank']}"}
+        data={"result":res}
         return data
 
 @app.get("/docids/")
-def get_doc_ids(subject: str, rank:str):
+def get_doc_ids(fuzzy_key: str, rank:str):
     try:
         rank_int=int(rank)
-        res= mongo_client[DB_NAME]["canonicalthread"].find_one(filter={"Subject":subject, "rank":rank_int}, projection={"doc_ids":1, "_id":0})
+        res= mongo_client[DB_NAME]["canonicalthread"].find_one(filter={"fuzzy_key":fuzzy_key, "rank":rank_int}, projection={"doc_ids":1, "_id":0})
     except ValueError as e:
         logger.exception(e)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"rank query must be a valid number, {rank=} received")
@@ -46,16 +46,16 @@ def get_doc_ids(subject: str, rank:str):
         logger.exception(e)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server encountered an error")
     if res is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"canonicalthread with Subject={subject} and {rank=} not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"canonicalthread with fuzzy_key={fuzzy_key} and {rank=} not found")
     else:
         data={"result":res["doc_ids"]}
         return data
 
 @app.get("/relations/")
-def get_relations(subject: str, rank:str):
+def get_relations(fuzzy_key: str, rank:str):
     try:
         rank_int= int(rank)
-        res= list(mongo_client[DB_NAME]["canonicalthread"].find(filter={"Subject":subject, "rank":{"$ne":rank_int}}, projection={"rank":1, "_id":0}))
+        res= list(mongo_client[DB_NAME]["canonicalthread"].find(filter={"fuzzy_key":fuzzy_key, "rank":{"$ne":rank_int}}, projection={"rank":1, "_id":0}))
     except ValueError as e:
         logger.exception(e)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"rank query must be a valid number, {rank=} received")
@@ -63,20 +63,21 @@ def get_relations(subject: str, rank:str):
         logger.exception(e)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server encountered an error")
     if res is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"canonicalthread with Subject={subject} {rank=} not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"canonicalthread with fuzzy_key={fuzzy_key} {rank=} not found")
     else:
         result={"parents":[], "children":[]}
         for doc in res:
             if doc["rank"]<rank_int and rank_int-doc["rank"]==1:
-                result["parents"].append(f"{subject}{doc['rank']}")
+                result["parents"].append(doc)
             elif doc["rank"]>rank_int and doc["rank"]-rank_int==1:
-                result["children"].append(f"{subject}{doc['rank']}")
+                result["children"].append(doc)
 
         data={"result":result}
         return data
 
 @app.get("/search")
-async def search_items(subject: str, rank:str):
+async def search_items(query:str):
     # FastAPI automatically decodes '%20' or '+' into a space character
-    return {"query_received": f"{subject}{rank}"}
+    res= list(mongo_client[DB_NAME]["canonicalthread"].find({"$text":{"$search":query}}, projection={"_id":0}))
+    return {"result":res}
 
