@@ -4,7 +4,7 @@ import os
 import traceback
 
 from kafka import KafkaConsumer, KafkaProducer
-from pymongo import MongoClient
+from pymongo import MongoClient, TEXT
 
 from email_thread_processing import ThreadProcessing
 logging.basicConfig(level=logging.INFO)
@@ -29,8 +29,11 @@ consumer = KafkaConsumer(
 dlq_producer= KafkaProducer(bootstrap_servers=[KAFKA_BROKER])
 mongo_client = MongoClient(MONGO_URI)
 if CREATE_INDEX:
-    mongo_client[ThreadProcessing.DB_NAME][ThreadProcessing.CT_COLL_NAME].create_index([("Subject",1),("rank",1)],unique=True)
-    mongo_client[ThreadProcessing.DB_NAME][ThreadProcessing.CT_COLL_NAME].create_index([("doc_ids",1)])
+    ct_coll=mongo_client[ThreadProcessing.DB_NAME][ThreadProcessing.CT_COLL_NAME]
+    re_coll=mongo_client[ThreadProcessing.DB_NAME][ThreadProcessing.RE_COLL_NAME]
+    ct_coll.create_index([("fuzzy_key",1),("rank",1)],unique=True)
+    ct_coll.create_index([("doc_ids",1)])
+    ct_coll.create_index([("participants", TEXT)])
     mongo_client[ThreadProcessing.DB_NAME][ThreadProcessing.RE_COLL_NAME].create_index([("doc_id",1)], unique=True)
 
 def consume(consumer_close_timeout:int=3, dlq_producer_flush_timeout:int=3):
@@ -67,6 +70,25 @@ def flush_messages():
             dlq_producer.flush()
             logger.info("consumer exit...")
 
+def test_ingestion():
+    paths=["producer/data/eval/6.txt",
+           "producer/data/eval/6_1.txt",
+           "producer/data/eval/6_1m.txt",
+           "producer/data/eval/6_1_2.txt",
+           "producer/data/eval/6_1_2m.txt",
+           "producer/data/eval/6_1m_2.txt",
+           "producer/data/eval/6_1m_2m.txt"]
+    for path in paths:
+        doc_id = path.split("/")[-1].split(".")[0]
+        with open(path, "r", encoding="latin-1") as f:
+            text= f.read()
+        emails= ThreadProcessing.split_thread(text)
+        ThreadProcessing.create_canonical_thread(doc_id, text, emails, mongo_client)
+        # res= simhash.Simhash(emails[-1][4])
+        # print(res.value)
+        # thread_sig= ThreadProcessing.thread_signature(emails)
+
+
 def test_mongodb():
     logger.info(f"testing mongodb connection...")
     mongo_client["testdb"]["testcollection"].insert_one({"hello":"world"})
@@ -74,5 +96,6 @@ def test_mongodb():
 if __name__=="__main__":
     #consumer.poll() # manual trigger to join group properly
     consume()
+    # test_ingestion()
     # flush_messages()
     # test_mongodb()

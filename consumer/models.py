@@ -83,10 +83,8 @@ class BaseModel:
 @dataclass
 class CanonicalThreadModel(BaseModel):
     # the permutation of From To CC may differ between emails in the same thread
-    # From:str
-    # To: str
-    # CC: str
-    Subject: str
+    participants:List
+    fuzzy_key: str
     rank: int
     doc_ids: List[str]
     _id: Optional[ObjectId]= field(default=None)
