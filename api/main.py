@@ -55,7 +55,7 @@ def get_doc_ids(fuzzy_key: str, rank:str):
 def get_relations(fuzzy_key: str, rank:str):
     try:
         rank_int= int(rank)
-        res= list(mongo_client[DB_NAME]["canonicalthread"].find(filter={"fuzzy_key":fuzzy_key, "rank":{"$ne":rank_int}}, projection={"rank":1, "_id":0}))
+        res= list(mongo_client[DB_NAME]["canonicalthread"].find(filter={"fuzzy_key":fuzzy_key, "rank":{"$ne":rank_int}}, projection={"_id":0}))
     except ValueError as e:
         logger.exception(e)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"rank query must be a valid number, {rank=} received")
